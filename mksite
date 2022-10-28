@@ -1,0 +1,93 @@
+#!/bin/sh
+
+######################################
+# Add Homestead site from github
+# 
+# USAGE:
+# mksite repo_name [db_name] [domain]
+######################################
+
+### SETTINGS ###
+homestead_path="$HOME/homestead"
+project_path="$HOME/projects"
+homestead_ip="192.168.56.56"
+git_repo="git@github.com:PDERAS"
+domain_prefix=""
+domain_suffix=".test"
+
+# Check for required repo argument
+if [ -z "$1" ]
+then
+    echo "Please supply repo name"
+    exit;
+fi
+
+# github repo name
+repo=$1
+
+# optional db name
+db_name=$2
+if [ -z "$db_name" ]
+then
+    db_name=$repo
+fi
+
+# optional domain name
+domain=$3
+if [ -z "$domain" ]
+then
+    # Concat domain prefix/suffix to repo name
+    domain="$domain_prefix$repo$domain_suffix"
+fi
+
+# Clone repo
+repo_path="$project_path"/"$repo"
+git clone "$git_repo"/"$repo".git $repo_path
+
+# Get php version from composer
+pv=$(awk -F ": \"" '/"php":/ {print $2}' "$repo_path"/composer.json | grep -o "\d\.\d")
+
+# Backup
+backup_time=$(date +%s)
+cp "$homestead_path"/Homestead.yaml "$homestead_path"/Homestead_"$backup_time".yaml
+
+# Add settings to Homestead.yaml
+awk -v d=$domain -v pv=$pv -v rp=$repo_path -v db=$db_name \
+    '/folders:/ {
+        print;
+        print "    - map: "rp;
+        print "      to: /home/vagrant/code/" d;
+        next
+    }
+    /databases:/ {
+        print;
+        print "    - " db;
+        next
+    }
+    /sites:/ {
+        print;
+        print "    - map: " d;
+        print "      to: /home/vagrant/code/" d "/public";
+        if (pv != "")
+            print "      php: \"" pv "\"";
+        next
+    }
+    { print }' \
+    "$homestead_path"/Homestead_"$backup_time".yaml > "$homestead_path"/Homestead.yaml
+
+# Add line to hosts
+read -p "Add site to /etc/hosts? (y/n) " yn
+case $yn in 
+	[yY] ) sudo -- sh -c -e "echo '$homestead_ip   $domain' >> /etc/hosts";;
+	* ) echo skipping hosts...;;
+esac
+
+# Provision Homestead
+read -p "Reload vagrant? (y/n) " yn
+case $yn in 
+	[yY] ) cd "$homestead_path" && vagrant reload --provision && cd -;;
+	* ) echo skipping reload...;;
+esac
+
+echo Done.
+exit;
