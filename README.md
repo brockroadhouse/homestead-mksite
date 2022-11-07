@@ -21,11 +21,10 @@ or copy to your favourite bin directory to execute from anywhere:
 ```
 homestead_path="$HOME/homestead"
 project_path="$HOME/projects"
-homestead_ip="192.168.56.56"
 git_repo="git@github.com:PDERAS"
 domain_prefix=""
 domain_suffix=".test"
 ```
 then:
 
-`mksite repo_name [db_name] [domain]`
+`mksite [-h] [-c] [-w] [-v] [-d db_name] [-u url] repository_name`

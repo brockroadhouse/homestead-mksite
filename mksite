@@ -4,16 +4,56 @@
 # Add Homestead site from github
 # 
 # USAGE:
-# mksite repo_name [db_name] [domain]
+# mksite repo_name [-c] [-h] [-v] [-d db_name] [-u url]
 ######################################
 
-### SETTINGS ###
+###### SETTINGS ######
 homestead_path="$HOME/homestead"
 project_path="$HOME/projects"
-homestead_ip="192.168.56.56"
 git_repo="git@github.com:PDERAS"
 domain_prefix=""
 domain_suffix=".test"
+######################
+
+
+function usage {
+      cat <<EOF
+Usage: $0 [-h] [-c] [-w] [-v] [-d db_name] [-u url] repository_name
+
+-h            Display help
+-c            Skip cloning of repo
+-w            Skip adding entry to /etc/hosts
+-v            Skip reloading of vagrant
+-d db_name    Specify database name. Defaults to repo name
+-u url        Specify url of site. Defaults to repo name and prefix/suffix in settings
+EOF
+}
+
+while getopts 'cwvd:u:h' OPTION; do
+  case "$OPTION" in
+    c)
+      clone_repo=0
+      ;;
+    w)
+      write_hosts=0
+      ;;
+    v)
+      reload_vagrant=0
+      ;;
+    d)
+      db_name="$OPTARG"
+      ;;
+    u)
+      url="$OPTARG"
+      ;;
+    ?)
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))
 
 # Check for required repo argument
 if [ -z "$1" ]
@@ -25,38 +65,59 @@ fi
 # github repo name
 repo=$1
 
-# optional db name
-db_name=$2
-if [ -z "$db_name" ]
-then
+# db defaults to repo name
+if [[ -z ${db_name} ]]; then
     db_name=$repo
 fi
 
-# optional domain name
-domain=$3
-if [ -z "$domain" ]
-then
-    # Concat domain prefix/suffix to repo name
-    domain="$domain_prefix$repo$domain_suffix"
+# default url
+# concat domain prefix/suffix to repo name
+if [[ -z ${url} ]]; then
+    url="$domain_prefix$repo$domain_suffix"
+fi
+
+# default to do all tasks 
+if [[ -z ${clone_repo} ]]; then
+    clone_repo=1
+fi
+if [[ -z ${write_hosts} ]]; then
+    write_hosts=1
+fi
+if [[ -z ${reload_vagrant} ]]; then
+    reload_vagrant=1
 fi
 
 # Clone repo
 repo_path="$project_path"/"$repo"
-git clone "$git_repo"/"$repo".git $repo_path
+if [ $clone_repo == 1 ]
+then
+    git clone "$git_repo"/"$repo".git $repo_path
+fi
+
+if [[ ! -d $repo_path ]]
+then
+    echo 'Repository directory does not exists. Cannot continue.'
+    echo 'Exiting.'
+    exit 1;
+fi
 
 # Get php version from composer
 pv=$(awk -F ": \"" '/"php":/ {print $2}' "$repo_path"/composer.json | grep -o "\d\.\d")
 
+# Get homestead ip from yaml
+homestead_ip=$(awk -F ":" '/ip:/ {print $2}' "$homestead_path"/Homestead.yaml | grep -o "\d*\.\d*\.\d*\.\d*")
+
+
 # Backup
 backup_time=$(date +%s)
-cp "$homestead_path"/Homestead.yaml "$homestead_path"/Homestead_"$backup_time".yaml
+mv "$homestead_path"/Homestead.yaml "$homestead_path"/Homestead_"$backup_time".yaml
 
 # Add settings to Homestead.yaml
-awk -v d=$domain -v pv=$pv -v rp=$repo_path -v db=$db_name \
+awk -v d=$url -v pv=$pv -v rp=$repo_path -v rn=$repo -v db=$db_name \
     '/folders:/ {
         print;
         print "    - map: "rp;
-        print "      to: /home/vagrant/code/" d;
+        print "      to: /home/vagrant/code/" rn;
         next
     }
     /databases:/ {
@@ -67,7 +128,7 @@ awk -v d=$domain -v pv=$pv -v rp=$repo_path -v db=$db_name \
     /sites:/ {
         print;
         print "    - map: " d;
-        print "      to: /home/vagrant/code/" d "/public";
+        print "      to: /home/vagrant/code/" rn "/public";
         if (pv != "")
             print "      php: \"" pv "\"";
         next
@@ -76,18 +137,16 @@ awk -v d=$domain -v pv=$pv -v rp=$repo_path -v db=$db_name \
     "$homestead_path"/Homestead_"$backup_time".yaml > "$homestead_path"/Homestead.yaml
 
 # Add line to hosts
-read -p "Add site to /etc/hosts? (y/n) " yn
-case $yn in 
-	[yY] ) sudo -- sh -c -e "echo '$homestead_ip   $domain' >> /etc/hosts";;
-	* ) echo skipping hosts...;;
-esac
+if [ $write_hosts == 1 ]
+then
+    sudo -- sh -c -e "echo '$homestead_ip   $url' >> /etc/hosts"
+fi
 
 # Provision Homestead
-read -p "Reload vagrant? (y/n) " yn
-case $yn in 
-	[yY] ) cd "$homestead_path" && vagrant reload --provision && cd -;;
-	* ) echo skipping reload...;;
-esac
+if [ $reload_vagrant == 1 ]
+then
+    cd "$homestead_path" && vagrant reload --provision && cd -;
+fi
 
 echo Done.
 exit;
